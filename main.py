@@ -15,8 +15,10 @@ def get_bybit_klines():
     url = "https://api.bybit.com/v5/market/kline"
     params = {"category": "linear", "symbol": "BTCUSDT", "interval": "15", "limit": 500}
     r = requests.get(url, params=params)
-    data = r.json()["result"]["list"]
-    df = pd.DataFrame(data, columns=["time","open","high","low","close","volume","turnover"])
+resp = r.json()
+if resp.get("retCode") != 0:
+    raise Exception(f"Bybit error: {resp}")
+data = resp["result"]["list"]    df = pd.DataFrame(data, columns=["time","open","high","low","close","volume","turnover"])
     df = df.astype(float)
     df = df.iloc[::-1].reset_index(drop=True)
     return df
