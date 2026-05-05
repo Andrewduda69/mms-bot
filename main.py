@@ -21,7 +21,6 @@ def get_bybit_klines():
         "limit": 500
     }
     r = requests.get(url, params=params)
-    send_telegram(f"Debug: status={r.status_code} text={r.text[:300]}")
     resp = r.json()
     if resp.get("retCode") != 0:
         raise Exception(f"Bybit error: {resp}")
