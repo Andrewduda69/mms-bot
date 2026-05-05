@@ -21,6 +21,7 @@ def get_bybit_klines():
         "limit": 500
     }
     r = requests.get(url, params=params)
+    send_telegram(f"Debug: status={r.status_code} text={r.text[:300]}")
     resp = r.json()
     if resp.get("retCode") != 0:
         raise Exception(f"Bybit error: {resp}")
@@ -89,9 +90,9 @@ while True:
         tp_short = round(lower.iloc[i], 0)
 
         if signal_long:
-            msg = f"🟢 <b>LONG!</b>\nEntry: {close_price}\nSL: {sl_long}\nTP: {tp_long}\nStoch: {round(stoch_k.iloc[i],1)}"
+            msg = f"🟢 LONG!\nEntry: {close_price}\nSL: {sl_long}\nTP: {tp_long}\nStoch: {round(stoch_k.iloc[i],1)}"
         elif signal_short:
-            msg = f"🔴 <b>SHORT!</b>\nEntry: {close_price}\nSL: {sl_short}\nTP: {tp_short}\nStoch: {round(stoch_k.iloc[i],1)}"
+            msg = f"🔴 SHORT!\nEntry: {close_price}\nSL: {sl_short}\nTP: {tp_short}\nStoch: {round(stoch_k.iloc[i],1)}"
         else:
             msg = None
 
@@ -102,5 +103,5 @@ while True:
         time.sleep(60)
 
     except Exception as e:
-        send_telegram(f"⚠️ Błąd bota: {str(e)}")
+        send_telegram(f"Blad bota: {str(e)}")
         time.sleep(60)
