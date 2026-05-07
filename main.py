@@ -9,7 +9,7 @@ CHAT_ID = "-5299312717"
 def send_telegram(msg):
     requests.get(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        params={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}
+        params={"chat_id": CHAT_ID, "text": msg}
     )
 
 def get_bybit_klines():
@@ -51,9 +51,13 @@ def stochastic(df, k=14, smooth=3):
     stoch = 100 * (df["close"] - low_min) / (high_max - low_min)
     return stoch.rolling(smooth).mean()
 
-last_signal = None
+# Stan pozycji
+active_direction = None
+active_sl = None
+active_tp = None
+active_entry = None
 
-send_telegram("✅ MMS Bot uruchomiony! Monitoruję BTCUSDT M15...")
+send_telegram("MMS Bot uruchomiony! Monitoruje BTCUSDT M15...")
 
 while True:
     try:
@@ -66,6 +70,8 @@ while True:
         stoch_k = stochastic(df)
 
         i = len(df) - 2
+        current_high = df["high"].iloc[-1]
+        current_low = df["low"].iloc[-1]
 
         touched_upper = df["high"].iloc[i] >= upper.iloc[i]
         touched_lower = df["low"].iloc[i] <= lower.iloc[i]
@@ -88,16 +94,58 @@ while True:
         sl_short = round(close_price * (1 + 0.019), 0)
         tp_short = round(lower.iloc[i], 0)
 
-        if signal_long:
-            msg = f"🟢 LONG!\nEntry: {close_price}\nSL: {sl_long}\nTP: {tp_long}\nStoch: {round(stoch_k.iloc[i],1)}"
-        elif signal_short:
-            msg = f"🔴 SHORT!\nEntry: {close_price}\nSL: {sl_short}\nTP: {tp_short}\nStoch: {round(stoch_k.iloc[i],1)}"
-        else:
-            msg = None
+        rr_long = round(abs(tp_long - close_price) / abs(close_price - sl_long), 2)
+        rr_short = round(abs(close_price - tp_short) / abs(sl_short - close_price), 2)
 
-        if msg and msg != last_signal:
-            send_telegram(msg)
-            last_signal = msg
+        # Sprawdz TP/SL dla aktywnej pozycji
+        if active_direction == "LONG" and active_sl and active_tp:
+            if current_low <= active_sl:
+                send_telegram(f"SL trafiony! LONG zamkniety na {active_sl}")
+                active_direction = None
+                active_sl = None
+                active_tp = None
+                active_entry = None
+            elif current_high >= active_tp:
+                send_telegram(f"TP trafiony! LONG zamkniety na {active_tp}")
+                active_direction = None
+                active_sl = None
+                active_tp = None
+                active_entry = None
+
+        elif active_direction == "SHORT" and active_sl and active_tp:
+            if current_high >= active_sl:
+                send_telegram(f"SL trafiony! SHORT zamkniety na {active_sl}")
+                active_direction = None
+                active_sl = None
+                active_tp = None
+                active_entry = None
+            elif current_low <= active_tp:
+                send_telegram(f"TP trafiony! SHORT zamkniety na {active_tp}")
+                active_direction = None
+                active_sl = None
+                active_tp = None
+                active_entry = None
+
+        # Nowy sygnal tylko gdy brak aktywnej pozycji lub przeciwny kierunek
+        if signal_long and active_direction != "LONG":
+            if active_direction == "SHORT":
+                send_telegram(f"Zamknij SHORT! Nowy sygnal LONG.")
+            rr_ok = "OK" if rr_long >= 1.5 else "SLABY"
+            send_telegram(f"LONG!\nEntry: {close_price}\nSL: {sl_long}\nTP: {tp_long}\nRR: {rr_long} {rr_ok}\nStoch: {round(stoch_k.iloc[i],1)}")
+            active_direction = "LONG"
+            active_sl = sl_long
+            active_tp = tp_long
+            active_entry = close_price
+
+        elif signal_short and active_direction != "SHORT":
+            if active_direction == "LONG":
+                send_telegram(f"Zamknij LONG! Nowy sygnal SHORT.")
+            rr_ok = "OK" if rr_short >= 1.5 else "SLABY"
+            send_telegram(f"SHORT!\nEntry: {close_price}\nSL: {sl_short}\nTP: {tp_short}\nRR: {rr_short} {rr_ok}\nStoch: {round(stoch_k.iloc[i],1)}")
+            active_direction = "SHORT"
+            active_sl = sl_short
+            active_tp = tp_short
+            active_entry = close_price
 
         time.sleep(60)
 
