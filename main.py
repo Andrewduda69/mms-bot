@@ -83,7 +83,7 @@ while True:
         ts = pd.Timestamp(df["time"].iloc[i] * 1000000)
         hour = ts.hour
         weekday = ts.weekday()
-        time_ok = 8 <= hour < 20 and weekday in [1, 2, 3]
+        time_ok = weekday not in [5, 6]
 
         signal_long = touched_lower and bull_reaction and stoch_os and time_ok
         signal_short = touched_upper and bear_reaction and stoch_ob and time_ok
