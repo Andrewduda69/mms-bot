@@ -65,8 +65,8 @@ while True:
 
         tma_mid = tma(df["close"], 240)
         atr_val = atr(df, 14)
-        upper = tma_mid + 1.2 * atr_val
-        lower = tma_mid - 1.2 * atr_val
+        upper = tma_mid + 1.5 * atr_val
+        lower = tma_mid - 1.5 * atr_val
         stoch_k = stochastic(df)
 
         i = len(df) - 2
