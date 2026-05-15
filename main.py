@@ -18,13 +18,23 @@ def send_telegram(msg):
     )
 
 def get_bybit_klines():
-    url = "https://api.bybit.com/v5/market/kline"
+    url = "https://api.binance.com/api/v3/klines"
     params = {
-        "category": "linear",
         "symbol": "BTCUSDT",
-        "interval": "15",
+        "interval": "15m",
         "limit": 500
     }
+    r = requests.get(url, params=params)
+    data = r.json()
+    df = pd.DataFrame(data, columns=[
+        "time","open","high","low","close","volume",
+        "close_time","quote_volume","trades",
+        "taker_buy_base","taker_buy_quote","ignore"
+    ])
+    df = df[["time","open","high","low","close","volume"]]
+    df = df.astype(float)
+    df = df.reset_index(drop=True)
+    return df
     r = requests.get(url, params=params)
     resp = r.json()
     if resp.get("retCode") != 0:
