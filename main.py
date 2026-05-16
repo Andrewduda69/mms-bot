@@ -100,23 +100,20 @@ while True:
         upper = tma_mid + 1.5 * atr_val
         lower = tma_mid - 1.5 * atr_val
 
-        # M15 stoch z %K i %D
         stoch_k_m15, stoch_d_m15 = stochastic_kd(df)
         stoch_ob = stoch_k_m15.iloc[-2] >= 70
         stoch_os = stoch_k_m15.iloc[-2] <= 30
 
-        # H1 stoch z %K i %D — przecięcie
         stoch_k_h1, stoch_d_h1 = stochastic_kd(df_h1)
         h1_k = stoch_k_h1.iloc[-2]
         h1_d = stoch_d_h1.iloc[-2]
         h1_k_prev = stoch_k_h1.iloc[-3]
         h1_d_prev = stoch_d_h1.iloc[-3]
 
-        # Przecięcie %K i %D na H1
-        h1_cross_up = h1_k_prev < h1_d_prev and h1_k > h1_d  # bullish cross
-        h1_cross_down = h1_k_prev > h1_d_prev and h1_k < h1_d  # bearish cross
-        h1_ok_long = h1_k < 60  # nie OB + opcjonalnie cross up
-        h1_ok_short = h1_k > 40  # nie OS + opcjonalnie cross down
+        h1_cross_up = h1_k_prev < h1_d_prev and h1_k > h1_d
+        h1_cross_down = h1_k_prev > h1_d_prev and h1_k < h1_d
+        h1_ok_long = h1_k < 60
+        h1_ok_short = h1_k > 40
 
         adx = calc_adx(df, 14)
 
@@ -134,7 +131,6 @@ while True:
         weekday = ts.weekday()
         no_weekend = weekday not in [5, 6]
 
-        # Sesja US
         hour_utc = ts.hour
         us_session = 15 <= hour_utc < 17
         us_session_info = "🇺🇸 Sesja US aktywna!" if us_session else ""
@@ -151,7 +147,6 @@ while True:
         bands_ok_long = lower_trend > -200
         bands_ok_short = upper_trend < 200
 
-        # Filtr płytkiej strefy — ulepszony
         bearish_candles = sum(1 for j in range(i-8, i)
                              if df["close"].iloc[j] < df["open"].iloc[j])
         price_range = max(df["high"].iloc[i-8:i]) - min(df["low"].iloc[i-8:i])
@@ -159,13 +154,10 @@ while True:
         flat_zone = bearish_candles >= 5 and price_range < atr_current * 0.5
         not_flat_zone = not flat_zone
 
-        # H4 kampania
         h4_start = ts.minute < 15 and ts.hour % 4 == 0
-        h4_campaign = h4_start and momentum < -1.0
 
         macro_block = is_macro_blackout()
 
-        # ADX oznaczenie
         if adx_val < 25:
             adx_info = f"ADX: {round(adx_val,1)} ✅ OK"
         elif adx_val < 40:
@@ -173,7 +165,6 @@ while True:
         else:
             adx_info = f"ADX: {round(adx_val,1)} ❌ TREND"
 
-        # H1 stoch info z przecięciem
         if h1_cross_up:
             h1_cross_info = " 📈 CROSS UP"
         elif h1_cross_down:
@@ -206,25 +197,32 @@ while True:
         rr_short = round(abs(close_price - tp_short) / abs(sl_short - close_price), 2)
         qty = round(375 / abs(close_price * 0.019), 4)
 
-        # Alert H4 kampanii
-        if h4_campaign and active_direction == "LONG":
+        # Kampania H4 dla LONG i SHORT
+        if h4_start and active_direction == "LONG" and momentum < -1.0:
             send_telegram(
-                f"⚠️ KAMPANIA H4!\n"
+                f"⚠️ KAMPANIA H4 PODAZOWA!\n"
                 f"Pierwsza M15 nowej H4 ze spadkiem\n"
                 f"Rozważ zamknięcie LONG!"
             )
 
-        # Monitoring aktywnej pozycji
+        if h4_start and active_direction == "SHORT" and momentum > 1.0:
+            send_telegram(
+                f"⚠️ KAMPANIA H4 POPYTOWA!\n"
+                f"Pierwsza M15 nowej H4 ze wzrostem\n"
+                f"Rozważ zamknięcie SHORT!"
+            )
+
+        # Monitoring LONG
         if active_direction == "LONG" and active_sl and active_tp:
             dist_to_tp = abs(active_tp - current_price) / abs(active_tp - active_entry) * 100
 
             if not dokladka_alert_sent and current_price > active_entry and bull_reaction:
                 send_telegram(
-                    f"⚡ DOKŁADKA możliwa!\n"
-                    f"Świeca potwierdziła LONG\n"
+                    f"⚡ DOKLADKA mozliwa!\n"
+                    f"Swieca potwierdzila LONG\n"
                     f"Rozważ dodanie pozycji\n"
-                    f"SL dokładki (knot): {round(df['low'].iloc[i], 0)}\n"
-                    f"Max SL dokładki: 1% = {round(active_entry * 0.99, 0)}"
+                    f"SL dokladki (knot): {round(df['low'].iloc[i], 0)}\n"
+                    f"Max SL dokladki 1%: {round(active_entry * 0.99, 0)}"
                 )
                 dokladka_alert_sent = True
 
@@ -238,7 +236,11 @@ while True:
                 tp_alert_sent = True
 
             if current_low <= active_sl:
-                send_telegram(f"❌ SL trafiony! LONG zamkniety na {active_sl}")
+                send_telegram(
+                    f"❌ SL trafiony!\n"
+                    f"LONG zamkniety na {active_sl}\n"
+                    f"Strata: ~${round((active_entry - active_sl) * qty, 0)}"
+                )
                 active_direction = None
                 active_sl = None
                 active_tp = None
@@ -246,7 +248,11 @@ while True:
                 tp_alert_sent = False
                 dokladka_alert_sent = False
             elif current_high >= active_tp:
-                send_telegram(f"✅ TP trafiony! LONG zamkniety na {active_tp}")
+                send_telegram(
+                    f"✅ TP trafiony!\n"
+                    f"LONG zamkniety na {active_tp}\n"
+                    f"Zysk: ~${round((active_tp - active_entry) * qty, 0)}"
+                )
                 active_direction = None
                 active_sl = None
                 active_tp = None
@@ -254,16 +260,17 @@ while True:
                 tp_alert_sent = False
                 dokladka_alert_sent = False
 
+        # Monitoring SHORT
         elif active_direction == "SHORT" and active_sl and active_tp:
             dist_to_tp = abs(current_price - active_tp) / abs(active_entry - active_tp) * 100
 
             if not dokladka_alert_sent and current_price < active_entry and bear_reaction:
                 send_telegram(
-                    f"⚡ DOKŁADKA możliwa!\n"
-                    f"Świeca potwierdziła SHORT\n"
+                    f"⚡ DOKLADKA mozliwa!\n"
+                    f"Swieca potwierdzila SHORT\n"
                     f"Rozważ dodanie pozycji\n"
-                    f"SL dokładki (knot): {round(df['high'].iloc[i], 0)}\n"
-                    f"Max SL dokładki: 1% = {round(active_entry * 1.01, 0)}"
+                    f"SL dokladki (knot): {round(df['high'].iloc[i], 0)}\n"
+                    f"Max SL dokladki 1%: {round(active_entry * 1.01, 0)}"
                 )
                 dokladka_alert_sent = True
 
@@ -277,7 +284,11 @@ while True:
                 tp_alert_sent = True
 
             if current_high >= active_sl:
-                send_telegram(f"❌ SL trafiony! SHORT zamkniety na {active_sl}")
+                send_telegram(
+                    f"❌ SL trafiony!\n"
+                    f"SHORT zamkniety na {active_sl}\n"
+                    f"Strata: ~${round((active_sl - active_entry) * qty, 0)}"
+                )
                 active_direction = None
                 active_sl = None
                 active_tp = None
@@ -285,7 +296,11 @@ while True:
                 tp_alert_sent = False
                 dokladka_alert_sent = False
             elif current_low <= active_tp:
-                send_telegram(f"✅ TP trafiony! SHORT zamkniety na {active_tp}")
+                send_telegram(
+                    f"✅ TP trafiony!\n"
+                    f"SHORT zamkniety na {active_tp}\n"
+                    f"Zysk: ~${round((active_entry - active_tp) * qty, 0)}"
+                )
                 active_direction = None
                 active_sl = None
                 active_tp = None
