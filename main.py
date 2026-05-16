@@ -88,7 +88,7 @@ active_entry = None
 tp_alert_sent = False
 dokladka_alert_sent = False
 
-send_telegram("MMS Bot v6 uruchomiony! Monitoruje BTCUSDT M15...")
+send_telegram("MMS Bot v7 uruchomiony! Monitoruje BTCUSDT M15...")
 
 while True:
     try:
@@ -112,8 +112,6 @@ while True:
 
         h1_cross_up = h1_k_prev < h1_d_prev and h1_k > h1_d
         h1_cross_down = h1_k_prev > h1_d_prev and h1_k < h1_d
-        h1_ok_long = h1_k < 60
-        h1_ok_short = h1_k > 40
 
         adx = calc_adx(df, 14)
 
@@ -142,22 +140,20 @@ while True:
         adx_val = adx.iloc[i]
         adx_ok = adx_val < 40
 
-        upper_trend = upper.iloc[i] - upper.iloc[i-5]
-        lower_trend = lower.iloc[i] - lower.iloc[i-5]
-        bands_ok_long = lower_trend > -200
-        bands_ok_short = upper_trend < 200
+        macro_block = is_macro_blackout()
 
+        # Płytka strefa — tylko info
         bearish_candles = sum(1 for j in range(i-8, i)
                              if df["close"].iloc[j] < df["open"].iloc[j])
         price_range = max(df["high"].iloc[i-8:i]) - min(df["low"].iloc[i-8:i])
         atr_current = atr_val.iloc[i]
         flat_zone = bearish_candles >= 5 and price_range < atr_current * 0.5
-        not_flat_zone = not flat_zone
+        flat_zone_warning = "⚠️ PLYTKA STREFA! Bądź ostrożny\n" if flat_zone else ""
 
+        # H4 start
         h4_start = ts.minute < 15 and ts.hour % 4 == 0
 
-        macro_block = is_macro_blackout()
-
+        # ADX oznaczenie
         if adx_val < 25:
             adx_info = f"ADX: {round(adx_val,1)} ✅ OK"
         elif adx_val < 40:
@@ -165,6 +161,7 @@ while True:
         else:
             adx_info = f"ADX: {round(adx_val,1)} ❌ TREND"
 
+        # H1 stoch info
         if h1_cross_up:
             h1_cross_info = " 📈 CROSS UP"
         elif h1_cross_down:
@@ -179,13 +176,12 @@ while True:
         else:
             h1_info = f"H1 Stoch: {round(h1_k,1)} ⚪ Neutral{h1_cross_info}"
 
+        # Sygnały — tylko momentum i ADX jako filtry
         signal_long = (touched_lower and bull_reaction and stoch_os and
-                      no_weekend and momentum_ok_long and not macro_block and
-                      adx_ok and bands_ok_long and h1_ok_long and not_flat_zone)
+                      no_weekend and momentum_ok_long and not macro_block and adx_ok)
 
         signal_short = (touched_upper and bear_reaction and stoch_ob and
-                       no_weekend and momentum_ok_short and not macro_block and
-                       adx_ok and bands_ok_short and h1_ok_short)
+                       no_weekend and momentum_ok_short and not macro_block and adx_ok)
 
         close_price = df["close"].iloc[i]
         sl_long = round(close_price * (1 - 0.019), 0)
@@ -195,9 +191,11 @@ while True:
 
         rr_long = round(abs(tp_long - close_price) / abs(close_price - sl_long), 2)
         rr_short = round(abs(close_price - tp_short) / abs(sl_short - close_price), 2)
+        rr_long_info = "✅ OK" if rr_long >= 1.5 else "⚠️ SLABY"
+        rr_short_info = "✅ OK" if rr_short >= 1.5 else "⚠️ SLABY"
         qty = round(375 / abs(close_price * 0.019), 4)
 
-        # Kampania H4 dla LONG i SHORT
+        # Kampania H4
         if h4_start and active_direction == "LONG" and momentum < -1.0:
             send_telegram(
                 f"⚠️ KAMPANIA H4 PODAZOWA!\n"
@@ -220,7 +218,6 @@ while True:
                 send_telegram(
                     f"⚡ DOKLADKA mozliwa!\n"
                     f"Swieca potwierdzila LONG\n"
-                    f"Rozważ dodanie pozycji\n"
                     f"SL dokladki (knot): {round(df['low'].iloc[i], 0)}\n"
                     f"Max SL dokladki 1%: {round(active_entry * 0.99, 0)}"
                 )
@@ -268,7 +265,6 @@ while True:
                 send_telegram(
                     f"⚡ DOKLADKA mozliwa!\n"
                     f"Swieca potwierdzila SHORT\n"
-                    f"Rozważ dodanie pozycji\n"
                     f"SL dokladki (knot): {round(df['high'].iloc[i], 0)}\n"
                     f"Max SL dokladki 1%: {round(active_entry * 1.01, 0)}"
                 )
@@ -317,12 +313,13 @@ while True:
                 f"Entry: {close_price}\n"
                 f"SL: {sl_long}\n"
                 f"TP: {tp_long}\n"
-                f"RR: {rr_long}\n"
+                f"RR: {rr_long} {rr_long_info}\n"
                 f"Qty: {qty} BTC\n"
                 f"Stoch M15: {round(stoch_k_m15.iloc[i],1)}\n"
                 f"{h1_info}\n"
                 f"{adx_info}\n"
                 f"Momentum: {round(momentum,2)}%\n"
+                f"{flat_zone_warning}"
                 f"{us_session_info}"
             )
             active_direction = "LONG"
@@ -340,12 +337,13 @@ while True:
                 f"Entry: {close_price}\n"
                 f"SL: {sl_short}\n"
                 f"TP: {tp_short}\n"
-                f"RR: {rr_short}\n"
+                f"RR: {rr_short} {rr_short_info}\n"
                 f"Qty: {qty} BTC\n"
                 f"Stoch M15: {round(stoch_k_m15.iloc[i],1)}\n"
                 f"{h1_info}\n"
                 f"{adx_info}\n"
                 f"Momentum: {round(momentum,2)}%\n"
+                f"{flat_zone_warning}"
                 f"{us_session_info}"
             )
             active_direction = "SHORT"
