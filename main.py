@@ -92,13 +92,10 @@ pending_sl     = None
 pending_qty    = None
 
 last_close_time  = None
-last_close_price = None
 COOLDOWN_MINUTES = 30
-COOLDOWN_ZONE    = 0.005
+TMA_CONFIRM_BARS = 3
 
-TMA_CONFIRM_BARS = 3  # ile świec z rzędu TMA musi zmieniać kierunek
-
-send_telegram("MMS Bot v12 — TMA 3-bar confirm uruchomiony!")
+send_telegram("MMS Bot v13 — Hard Cooldown uruchomiony!")
 
 while True:
     try:
@@ -110,7 +107,6 @@ while True:
         upper   = tma_mid + 1.5 * atr_val
         lower   = tma_mid - 1.5 * atr_val
 
-        # TMA kierunek — 3 świece z rzędu
         tma_down_confirmed = all(
             tma_mid.iloc[-i] < tma_mid.iloc[-i-1]
             for i in range(1, TMA_CONFIRM_BARS + 1)
@@ -196,12 +192,11 @@ while True:
         sl_short    = round(close_price * (1 + 0.019), 0)
         qty         = round(375 / abs(close_price * 0.019), 4)
 
-        # Cooldown strefowy
+        # Hard cooldown — bez wyjątków
         in_cooldown = False
-        if last_close_time and last_close_price:
-            elapsed    = (datetime.now(timezone.utc) - last_close_time).total_seconds() / 60
-            price_diff = abs(close_price - last_close_price) / last_close_price
-            if elapsed < COOLDOWN_MINUTES and price_diff < COOLDOWN_ZONE:
+        if last_close_time:
+            elapsed = (datetime.now(timezone.utc) - last_close_time).total_seconds() / 60
+            if elapsed < COOLDOWN_MINUTES:
                 in_cooldown = True
 
         signal_long  = (touched_lower and bull_reaction and stoch_os and
@@ -234,12 +229,15 @@ while True:
                     f"LONG zamkniety na {active_sl}\n"
                     f"Strata: ~${round((active_entry - active_sl) * qty, 0)}"
                 )
-                last_close_price    = close_price
                 last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
                 dokladka_alert_sent = False
+                pending_signal      = None
+                pending_close       = None
+                pending_sl          = None
+                pending_qty         = None
 
             elif tma_down_confirmed:
                 send_telegram(
@@ -248,12 +246,15 @@ while True:
                     f"Cena: {current_price}\n"
                     f"Zysk szacowany: ~${round((current_price - active_entry) * qty, 0)}"
                 )
-                last_close_price    = close_price
                 last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
                 dokladka_alert_sent = False
+                pending_signal      = None
+                pending_close       = None
+                pending_sl          = None
+                pending_qty         = None
 
         # ─── MONITORING SHORT ─────────────────────────────────
         elif active_direction == "SHORT" and active_sl:
@@ -272,12 +273,15 @@ while True:
                     f"SHORT zamkniety na {active_sl}\n"
                     f"Strata: ~${round((active_sl - active_entry) * qty, 0)}"
                 )
-                last_close_price    = close_price
                 last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
                 dokladka_alert_sent = False
+                pending_signal      = None
+                pending_close       = None
+                pending_sl          = None
+                pending_qty         = None
 
             elif tma_up_confirmed:
                 send_telegram(
@@ -286,12 +290,15 @@ while True:
                     f"Cena: {current_price}\n"
                     f"Zysk szacowany: ~${round((active_entry - current_price) * qty, 0)}"
                 )
-                last_close_price    = close_price
                 last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
                 dokladka_alert_sent = False
+                pending_signal      = None
+                pending_close       = None
+                pending_sl          = None
+                pending_qty         = None
 
         # ─── PENDING — zapamiętaj sygnał ─────────────────────
         if active_direction is None and not in_cooldown:
