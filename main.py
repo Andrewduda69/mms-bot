@@ -81,22 +81,9 @@ def is_macro_blackout():
             return True
     return False
 
-def in_cooldown_zone(current_price, last_close_price, last_close_time, minutes=30, zone_pct=0.005):
-    if last_close_time is None or last_close_price is None:
-        return False
-    elapsed = (datetime.now(timezone.utc) - last_close_time).total_seconds() / 60
-    if elapsed >= minutes:
-        return False
-    # Jeśli cena ruszyła się ponad 0.5% od ostatniego zamknięcia — nie blokuj
-    price_diff = abs(current_price - last_close_price) / last_close_price
-    if price_diff > zone_pct:
-        return False
-    return True
-
 active_direction    = None
 active_sl           = None
 active_entry        = None
-tp_alert_sent       = False
 dokladka_alert_sent = False
 
 pending_signal = None
@@ -106,8 +93,12 @@ pending_qty    = None
 
 last_close_time  = None
 last_close_price = None
+COOLDOWN_MINUTES = 30
+COOLDOWN_ZONE    = 0.005
 
-send_telegram("MMS Bot v11 — Zone Cooldown uruchomiony!")
+TMA_CONFIRM_BARS = 3  # ile świec z rzędu TMA musi zmieniać kierunek
+
+send_telegram("MMS Bot v12 — TMA 3-bar confirm uruchomiony!")
 
 while True:
     try:
@@ -119,8 +110,15 @@ while True:
         upper   = tma_mid + 1.5 * atr_val
         lower   = tma_mid - 1.5 * atr_val
 
-        tma_direction_up   = tma_mid.iloc[-2] > tma_mid.iloc[-3]
-        tma_direction_down = tma_mid.iloc[-2] < tma_mid.iloc[-3]
+        # TMA kierunek — 3 świece z rzędu
+        tma_down_confirmed = all(
+            tma_mid.iloc[-i] < tma_mid.iloc[-i-1]
+            for i in range(1, TMA_CONFIRM_BARS + 1)
+        )
+        tma_up_confirmed = all(
+            tma_mid.iloc[-i] > tma_mid.iloc[-i-1]
+            for i in range(1, TMA_CONFIRM_BARS + 1)
+        )
 
         stoch_k_m15, stoch_d_m15 = stochastic_kd(df)
         stoch_ob = stoch_k_m15.iloc[-2] >= 70
@@ -198,13 +196,19 @@ while True:
         sl_short    = round(close_price * (1 + 0.019), 0)
         qty         = round(375 / abs(close_price * 0.019), 4)
 
-        cooldown = in_cooldown_zone(close_price, last_close_price, last_close_time)
+        # Cooldown strefowy
+        in_cooldown = False
+        if last_close_time and last_close_price:
+            elapsed    = (datetime.now(timezone.utc) - last_close_time).total_seconds() / 60
+            price_diff = abs(close_price - last_close_price) / last_close_price
+            if elapsed < COOLDOWN_MINUTES and price_diff < COOLDOWN_ZONE:
+                in_cooldown = True
 
         signal_long  = (touched_lower and bull_reaction and stoch_os and
-                       no_weekend and momentum_ok_long and not macro_block and adx_ok and not cooldown)
+                       no_weekend and momentum_ok_long and not macro_block and adx_ok and not in_cooldown)
 
         signal_short = (touched_upper and bear_reaction and stoch_ob and
-                       no_weekend and momentum_ok_short and not macro_block and adx_ok and not cooldown)
+                       no_weekend and momentum_ok_short and not macro_block and adx_ok and not in_cooldown)
 
         # ─── KAMPANIA H4 ──────────────────────────────────────
         if h4_start and active_direction == "LONG" and momentum < -1.0:
@@ -235,12 +239,11 @@ while True:
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
-                tp_alert_sent       = False
                 dokladka_alert_sent = False
 
-            elif tma_direction_down:
+            elif tma_down_confirmed:
                 send_telegram(
-                    f"📉 TMA odwrócił w dół!\n"
+                    f"📉 TMA odwrócił w dół (3 świece)!\n"
                     f"Zamknij LONG!\n"
                     f"Cena: {current_price}\n"
                     f"Zysk szacowany: ~${round((current_price - active_entry) * qty, 0)}"
@@ -250,7 +253,6 @@ while True:
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
-                tp_alert_sent       = False
                 dokladka_alert_sent = False
 
         # ─── MONITORING SHORT ─────────────────────────────────
@@ -275,12 +277,11 @@ while True:
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
-                tp_alert_sent       = False
                 dokladka_alert_sent = False
 
-            elif tma_direction_up:
+            elif tma_up_confirmed:
                 send_telegram(
-                    f"📈 TMA odwrócił w górę!\n"
+                    f"📈 TMA odwrócił w górę (3 świece)!\n"
                     f"Zamknij SHORT!\n"
                     f"Cena: {current_price}\n"
                     f"Zysk szacowany: ~${round((active_entry - current_price) * qty, 0)}"
@@ -290,11 +291,10 @@ while True:
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
-                tp_alert_sent       = False
                 dokladka_alert_sent = False
 
         # ─── PENDING — zapamiętaj sygnał ─────────────────────
-        if active_direction is None and not cooldown:
+        if active_direction is None and not in_cooldown:
             if signal_long and pending_signal != "LONG":
                 pending_signal = "LONG"
                 pending_close  = close_price
@@ -325,7 +325,7 @@ while True:
                 f"🟢 LONG! ✅ Świeca potwierdzona\n"
                 f"Entry: {close_price}\n"
                 f"SL: {pending_sl}\n"
-                f"TP: dynamiczny (zamknięcie gdy TMA odwróci)\n"
+                f"TP: dynamiczny (zamknięcie gdy TMA odwróci 3 świece)\n"
                 f"Qty: {pending_qty} BTC\n"
                 f"Stoch M15: {round(stoch_k_m15.iloc[i],1)}\n"
                 f"{h1_info}\n"
@@ -337,7 +337,6 @@ while True:
             active_direction    = "LONG"
             active_sl           = pending_sl
             active_entry        = close_price
-            tp_alert_sent       = False
             dokladka_alert_sent = False
             pending_signal      = None
             pending_close       = None
@@ -349,7 +348,7 @@ while True:
                 f"🔴 SHORT! ✅ Świeca potwierdzona\n"
                 f"Entry: {close_price}\n"
                 f"SL: {pending_sl}\n"
-                f"TP: dynamiczny (zamknięcie gdy TMA odwróci)\n"
+                f"TP: dynamiczny (zamknięcie gdy TMA odwróci 3 świece)\n"
                 f"Qty: {pending_qty} BTC\n"
                 f"Stoch M15: {round(stoch_k_m15.iloc[i],1)}\n"
                 f"{h1_info}\n"
@@ -361,7 +360,6 @@ while True:
             active_direction    = "SHORT"
             active_sl           = pending_sl
             active_entry        = close_price
-            tp_alert_sent       = False
             dokladka_alert_sent = False
             pending_signal      = None
             pending_close       = None
