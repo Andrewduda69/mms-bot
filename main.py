@@ -81,6 +81,18 @@ def is_macro_blackout():
             return True
     return False
 
+def in_cooldown_zone(current_price, last_close_price, last_close_time, minutes=30, zone_pct=0.005):
+    if last_close_time is None or last_close_price is None:
+        return False
+    elapsed = (datetime.now(timezone.utc) - last_close_time).total_seconds() / 60
+    if elapsed >= minutes:
+        return False
+    # Jeśli cena ruszyła się ponad 0.5% od ostatniego zamknięcia — nie blokuj
+    price_diff = abs(current_price - last_close_price) / last_close_price
+    if price_diff > zone_pct:
+        return False
+    return True
+
 active_direction    = None
 active_sl           = None
 active_entry        = None
@@ -92,12 +104,15 @@ pending_close  = None
 pending_sl     = None
 pending_qty    = None
 
-send_telegram("MMS Bot v9 — Potwierdzenie świecy uruchomiony!")
+last_close_time  = None
+last_close_price = None
+
+send_telegram("MMS Bot v11 — Zone Cooldown uruchomiony!")
 
 while True:
     try:
-        df     = get_klines("15m", 500)
-        df_h1  = get_klines("1h", 100)
+        df    = get_klines("15m", 500)
+        df_h1 = get_klines("1h", 100)
 
         tma_mid = tma(df["close"], 240)
         atr_val = atr_calc(df, 14)
@@ -120,7 +135,7 @@ while True:
         h1_cross_up   = h1_k_prev < h1_d_prev and h1_k > h1_d
         h1_cross_down = h1_k_prev > h1_d_prev and h1_k < h1_d
 
-        adx     = calc_adx(df, 14)
+        adx = calc_adx(df, 14)
 
         i             = len(df) - 2
         current_price = df["close"].iloc[-1]
@@ -183,11 +198,13 @@ while True:
         sl_short    = round(close_price * (1 + 0.019), 0)
         qty         = round(375 / abs(close_price * 0.019), 4)
 
+        cooldown = in_cooldown_zone(close_price, last_close_price, last_close_time)
+
         signal_long  = (touched_lower and bull_reaction and stoch_os and
-                       no_weekend and momentum_ok_long and not macro_block and adx_ok)
+                       no_weekend and momentum_ok_long and not macro_block and adx_ok and not cooldown)
 
         signal_short = (touched_upper and bear_reaction and stoch_ob and
-                       no_weekend and momentum_ok_short and not macro_block and adx_ok)
+                       no_weekend and momentum_ok_short and not macro_block and adx_ok and not cooldown)
 
         # ─── KAMPANIA H4 ──────────────────────────────────────
         if h4_start and active_direction == "LONG" and momentum < -1.0:
@@ -213,6 +230,8 @@ while True:
                     f"LONG zamkniety na {active_sl}\n"
                     f"Strata: ~${round((active_entry - active_sl) * qty, 0)}"
                 )
+                last_close_price    = close_price
+                last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
@@ -226,6 +245,8 @@ while True:
                     f"Cena: {current_price}\n"
                     f"Zysk szacowany: ~${round((current_price - active_entry) * qty, 0)}"
                 )
+                last_close_price    = close_price
+                last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
@@ -249,6 +270,8 @@ while True:
                     f"SHORT zamkniety na {active_sl}\n"
                     f"Strata: ~${round((active_sl - active_entry) * qty, 0)}"
                 )
+                last_close_price    = close_price
+                last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
@@ -262,6 +285,8 @@ while True:
                     f"Cena: {current_price}\n"
                     f"Zysk szacowany: ~${round((active_entry - current_price) * qty, 0)}"
                 )
+                last_close_price    = close_price
+                last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
@@ -269,34 +294,33 @@ while True:
                 dokladka_alert_sent = False
 
         # ─── PENDING — zapamiętaj sygnał ─────────────────────
-        if signal_long and active_direction != "LONG" and pending_signal != "LONG":
-            pending_signal = "LONG"
-            pending_close  = close_price
-            pending_sl     = sl_long
-            pending_qty    = qty
-            send_telegram(
-                f"⏳ OCZEKUJE na potwierdzenie LONG\n"
-                f"Następna świeca musi być zielona\n"
-                f"Strefa: {close_price}\n"
-                f"SL planowany: {sl_long}"
-            )
+        if active_direction is None and not cooldown:
+            if signal_long and pending_signal != "LONG":
+                pending_signal = "LONG"
+                pending_close  = close_price
+                pending_sl     = sl_long
+                pending_qty    = qty
+                send_telegram(
+                    f"⏳ OCZEKUJE na potwierdzenie LONG\n"
+                    f"Następna świeca musi być zielona\n"
+                    f"Strefa: {close_price}\n"
+                    f"SL planowany: {sl_long}"
+                )
 
-        elif signal_short and active_direction != "SHORT" and pending_signal != "SHORT":
-            pending_signal = "SHORT"
-            pending_close  = close_price
-            pending_sl     = sl_short
-            pending_qty    = qty
-            send_telegram(
-                f"⏳ OCZEKUJE na potwierdzenie SHORT\n"
-                f"Następna świeca musi być czerwona\n"
-                f"Strefa: {close_price}\n"
-                f"SL planowany: {sl_short}"
-            )
+            elif signal_short and pending_signal != "SHORT":
+                pending_signal = "SHORT"
+                pending_close  = close_price
+                pending_sl     = sl_short
+                pending_qty    = qty
+                send_telegram(
+                    f"⏳ OCZEKUJE na potwierdzenie SHORT\n"
+                    f"Następna świeca musi być czerwona\n"
+                    f"Strefa: {close_price}\n"
+                    f"SL planowany: {sl_short}"
+                )
 
         # ─── POTWIERDZENIE ŚWIECY ─────────────────────────────
-        if pending_signal == "LONG" and bull_reaction:
-            if active_direction == "SHORT":
-                send_telegram("🔄 Zamknij SHORT! Nowy sygnał LONG potwierdzony.")
+        if pending_signal == "LONG" and bull_reaction and active_direction is None:
             send_telegram(
                 f"🟢 LONG! ✅ Świeca potwierdzona\n"
                 f"Entry: {close_price}\n"
@@ -320,9 +344,7 @@ while True:
             pending_sl          = None
             pending_qty         = None
 
-        elif pending_signal == "SHORT" and bear_reaction:
-            if active_direction == "LONG":
-                send_telegram("🔄 Zamknij LONG! Nowy sygnał SHORT potwierdzony.")
+        elif pending_signal == "SHORT" and bear_reaction and active_direction is None:
             send_telegram(
                 f"🔴 SHORT! ✅ Świeca potwierdzona\n"
                 f"Entry: {close_price}\n"
