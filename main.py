@@ -84,6 +84,7 @@ def is_macro_blackout():
 active_direction    = None
 active_sl           = None
 active_entry        = None
+active_tp_mid       = None
 dokladka_alert_sent = False
 
 pending_signal = None
@@ -91,11 +92,10 @@ pending_close  = None
 pending_sl     = None
 pending_qty    = None
 
-last_close_time  = None
+last_close_time = None
 COOLDOWN_MINUTES = 30
-TMA_CONFIRM_BARS = 3
 
-send_telegram("MMS Bot v13 — Hard Cooldown uruchomiony!")
+send_telegram("MMS Bot v14 — TP na TMA Mid uruchomiony!")
 
 while True:
     try:
@@ -107,14 +107,7 @@ while True:
         upper   = tma_mid + 1.5 * atr_val
         lower   = tma_mid - 1.5 * atr_val
 
-        tma_down_confirmed = all(
-            tma_mid.iloc[-i] < tma_mid.iloc[-i-1]
-            for i in range(1, TMA_CONFIRM_BARS + 1)
-        )
-        tma_up_confirmed = all(
-            tma_mid.iloc[-i] > tma_mid.iloc[-i-1]
-            for i in range(1, TMA_CONFIRM_BARS + 1)
-        )
+        current_tma_mid = tma_mid.iloc[-1]
 
         stoch_k_m15, stoch_d_m15 = stochastic_kd(df)
         stoch_ob = stoch_k_m15.iloc[-2] >= 70
@@ -192,7 +185,7 @@ while True:
         sl_short    = round(close_price * (1 + 0.019), 0)
         qty         = round(375 / abs(close_price * 0.019), 4)
 
-        # Hard cooldown — bez wyjątków
+        # Hard cooldown
         in_cooldown = False
         if last_close_time:
             elapsed = (datetime.now(timezone.utc) - last_close_time).total_seconds() / 60
@@ -233,26 +226,27 @@ while True:
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
+                active_tp_mid       = None
                 dokladka_alert_sent = False
                 pending_signal      = None
-                pending_close       = None
                 pending_sl          = None
                 pending_qty         = None
 
-            elif tma_down_confirmed:
+            elif current_high >= current_tma_mid:
                 send_telegram(
-                    f"📉 TMA odwrócił w dół (3 świece)!\n"
+                    f"🎯 TP trafiony — TMA Mid!\n"
                     f"Zamknij LONG!\n"
                     f"Cena: {current_price}\n"
-                    f"Zysk szacowany: ~${round((current_price - active_entry) * qty, 0)}"
+                    f"TMA Mid: {round(current_tma_mid, 0)}\n"
+                    f"Zysk szacowany: ~${round((current_tma_mid - active_entry) * qty, 0)}"
                 )
                 last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
+                active_tp_mid       = None
                 dokladka_alert_sent = False
                 pending_signal      = None
-                pending_close       = None
                 pending_sl          = None
                 pending_qty         = None
 
@@ -277,30 +271,31 @@ while True:
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
+                active_tp_mid       = None
                 dokladka_alert_sent = False
                 pending_signal      = None
-                pending_close       = None
                 pending_sl          = None
                 pending_qty         = None
 
-            elif tma_up_confirmed:
+            elif current_low <= current_tma_mid:
                 send_telegram(
-                    f"📈 TMA odwrócił w górę (3 świece)!\n"
+                    f"🎯 TP trafiony — TMA Mid!\n"
                     f"Zamknij SHORT!\n"
                     f"Cena: {current_price}\n"
-                    f"Zysk szacowany: ~${round((active_entry - current_price) * qty, 0)}"
+                    f"TMA Mid: {round(current_tma_mid, 0)}\n"
+                    f"Zysk szacowany: ~${round((active_entry - current_tma_mid) * qty, 0)}"
                 )
                 last_close_time     = datetime.now(timezone.utc)
                 active_direction    = None
                 active_sl           = None
                 active_entry        = None
+                active_tp_mid       = None
                 dokladka_alert_sent = False
                 pending_signal      = None
-                pending_close       = None
                 pending_sl          = None
                 pending_qty         = None
 
-        # ─── PENDING — zapamiętaj sygnał ─────────────────────
+        # ─── PENDING ──────────────────────────────────────────
         if active_direction is None and not in_cooldown:
             if signal_long and pending_signal != "LONG":
                 pending_signal = "LONG"
@@ -311,7 +306,8 @@ while True:
                     f"⏳ OCZEKUJE na potwierdzenie LONG\n"
                     f"Następna świeca musi być zielona\n"
                     f"Strefa: {close_price}\n"
-                    f"SL planowany: {sl_long}"
+                    f"SL planowany: {sl_long}\n"
+                    f"TP planowany (TMA Mid): {round(current_tma_mid, 0)}"
                 )
 
             elif signal_short and pending_signal != "SHORT":
@@ -323,7 +319,8 @@ while True:
                     f"⏳ OCZEKUJE na potwierdzenie SHORT\n"
                     f"Następna świeca musi być czerwona\n"
                     f"Strefa: {close_price}\n"
-                    f"SL planowany: {sl_short}"
+                    f"SL planowany: {sl_short}\n"
+                    f"TP planowany (TMA Mid): {round(current_tma_mid, 0)}"
                 )
 
         # ─── POTWIERDZENIE ŚWIECY ─────────────────────────────
@@ -332,7 +329,7 @@ while True:
                 f"🟢 LONG! ✅ Świeca potwierdzona\n"
                 f"Entry: {close_price}\n"
                 f"SL: {pending_sl}\n"
-                f"TP: dynamiczny (zamknięcie gdy TMA odwróci 3 świece)\n"
+                f"TP: {round(current_tma_mid, 0)} (TMA Mid)\n"
                 f"Qty: {pending_qty} BTC\n"
                 f"Stoch M15: {round(stoch_k_m15.iloc[i],1)}\n"
                 f"{h1_info}\n"
@@ -344,6 +341,7 @@ while True:
             active_direction    = "LONG"
             active_sl           = pending_sl
             active_entry        = close_price
+            active_tp_mid       = current_tma_mid
             dokladka_alert_sent = False
             pending_signal      = None
             pending_close       = None
@@ -355,7 +353,7 @@ while True:
                 f"🔴 SHORT! ✅ Świeca potwierdzona\n"
                 f"Entry: {close_price}\n"
                 f"SL: {pending_sl}\n"
-                f"TP: dynamiczny (zamknięcie gdy TMA odwróci 3 świece)\n"
+                f"TP: {round(current_tma_mid, 0)} (TMA Mid)\n"
                 f"Qty: {pending_qty} BTC\n"
                 f"Stoch M15: {round(stoch_k_m15.iloc[i],1)}\n"
                 f"{h1_info}\n"
@@ -367,6 +365,7 @@ while True:
             active_direction    = "SHORT"
             active_sl           = pending_sl
             active_entry        = close_price
+            active_tp_mid       = current_tma_mid
             dokladka_alert_sent = False
             pending_signal      = None
             pending_close       = None
