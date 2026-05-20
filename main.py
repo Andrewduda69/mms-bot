@@ -29,6 +29,20 @@ def get_klines(interval="15m", limit=500):
     df = df.astype(float)
     return df
 
+def get_klines_h1(limit=200):
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": "BTCUSDT", "interval": "1h", "limit": limit}
+    r = requests.get(url, params=params)
+    data = r.json()
+    df = pd.DataFrame(data, columns=[
+        "time","open","high","low","close","volume",
+        "close_time","quote_volume","trades",
+        "taker_buy_base","taker_buy_quote","ignore"
+    ])
+    df = df[["time","open","high","low","close","volume"]]
+    df = df.astype(float)
+    return df
+
 def tma(series, length):
     sma1 = series.rolling(length).mean()
     return sma1.rolling(length).mean()
@@ -95,12 +109,12 @@ pending_qty    = None
 last_close_time = None
 COOLDOWN_MINUTES = 30
 
-send_telegram("MMS Bot v14 — TP na TMA Mid uruchomiony!")
+send_telegram("MMS Bot v15 — H1 Stoch jako główny filtr uruchomiony!")
 
 while True:
     try:
         df    = get_klines("15m", 500)
-        df_h1 = get_klines("1h", 100)
+        df_h1 = get_klines_h1(200)
 
         tma_mid = tma(df["close"], 240)
         atr_val = atr_calc(df, 14)
@@ -109,18 +123,21 @@ while True:
 
         current_tma_mid = tma_mid.iloc[-1]
 
-        stoch_k_m15, stoch_d_m15 = stochastic_kd(df)
-        stoch_ob = stoch_k_m15.iloc[-2] >= 70
-        stoch_os = stoch_k_m15.iloc[-2] <= 30
-
+        # H1 stoch jako główny filtr
         stoch_k_h1, stoch_d_h1 = stochastic_kd(df_h1)
         h1_k      = stoch_k_h1.iloc[-2]
         h1_d      = stoch_d_h1.iloc[-2]
         h1_k_prev = stoch_k_h1.iloc[-3]
         h1_d_prev = stoch_d_h1.iloc[-3]
 
+        stoch_ob  = h1_k >= 70
+        stoch_os  = h1_k <= 30
+
         h1_cross_up   = h1_k_prev < h1_d_prev and h1_k > h1_d
         h1_cross_down = h1_k_prev > h1_d_prev and h1_k < h1_d
+
+        # M15 stoch tylko informacyjnie
+        stoch_k_m15, _ = stochastic_kd(df)
 
         adx = calc_adx(df, 14)
 
@@ -185,7 +202,6 @@ while True:
         sl_short    = round(close_price * (1 + 0.019), 0)
         qty         = round(375 / abs(close_price * 0.019), 4)
 
-        # Hard cooldown
         in_cooldown = False
         if last_close_time:
             elapsed = (datetime.now(timezone.utc) - last_close_time).total_seconds() / 60
