@@ -29,20 +29,6 @@ def get_klines(interval="15m", limit=500):
     df = df.astype(float)
     return df
 
-def get_klines_h1(limit=200):
-    url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": "BTCUSDT", "interval": "1h", "limit": limit}
-    r = requests.get(url, params=params)
-    data = r.json()
-    df = pd.DataFrame(data, columns=[
-        "time","open","high","low","close","volume",
-        "close_time","quote_volume","trades",
-        "taker_buy_base","taker_buy_quote","ignore"
-    ])
-    df = df[["time","open","high","low","close","volume"]]
-    df = df.astype(float)
-    return df
-
 def tma(series, length):
     sma1 = series.rolling(length).mean()
     return sma1.rolling(length).mean()
@@ -95,56 +81,44 @@ def is_macro_blackout():
             return True
     return False
 
-active_direction    = None
-active_sl           = None
-active_entry        = None
-active_tp_mid       = None
-dokladka_alert_sent = False
-
-pending_signal = None
-pending_close  = None
-pending_sl     = None
-pending_qty    = None
-
-last_close_time = None
+active_direction = None
+pending_signal   = None
+pending_sl       = None
+pending_qty      = None
+last_close_time  = None
 COOLDOWN_MINUTES = 30
 
-send_telegram("MMS Bot v15 — H1 Stoch jako główny filtr uruchomiony!")
+send_telegram("MMS Bot v16 — Prosty, czysty, działa!")
 
 while True:
     try:
         df    = get_klines("15m", 500)
-        df_h1 = get_klines_h1(200)
+        df_h1 = get_klines("1h", 100)
 
         tma_mid = tma(df["close"], 240)
         atr_val = atr_calc(df, 14)
         upper   = tma_mid + 1.5 * atr_val
         lower   = tma_mid - 1.5 * atr_val
 
-        current_tma_mid = tma_mid.iloc[-1]
+        stoch_k_m15, _ = stochastic_kd(df)
+        stoch_ob = stoch_k_m15.iloc[-2] >= 70
+        stoch_os = stoch_k_m15.iloc[-2] <= 30
 
-        # H1 stoch jako główny filtr
         stoch_k_h1, stoch_d_h1 = stochastic_kd(df_h1)
         h1_k      = stoch_k_h1.iloc[-2]
         h1_d      = stoch_d_h1.iloc[-2]
         h1_k_prev = stoch_k_h1.iloc[-3]
         h1_d_prev = stoch_d_h1.iloc[-3]
 
-        stoch_ob  = h1_k >= 70
-        stoch_os  = h1_k <= 30
-
         h1_cross_up   = h1_k_prev < h1_d_prev and h1_k > h1_d
         h1_cross_down = h1_k_prev > h1_d_prev and h1_k < h1_d
 
-        # M15 stoch tylko informacyjnie
-        stoch_k_m15, _ = stochastic_kd(df)
-
-        adx = calc_adx(df, 14)
+        adx    = calc_adx(df, 14)
+        adx_val = adx.iloc[-2]
+        adx_ok  = adx_val < 40
 
         i             = len(df) - 2
         current_price = df["close"].iloc[-1]
-        current_high  = df["high"].iloc[-1]
-        current_low   = df["low"].iloc[-1]
 
         touched_upper = df["high"].iloc[i] >= upper.iloc[i]
         touched_lower = df["low"].iloc[i] <= lower.iloc[i]
@@ -163,18 +137,20 @@ while True:
         momentum_ok_long  = momentum > -1.5
         momentum_ok_short = momentum < 1.5
 
-        adx_val = adx.iloc[i]
-        adx_ok  = adx_val < 40
-
         macro_block = is_macro_blackout()
 
-        bearish_candles   = sum(1 for j in range(i-8, i) if df["close"].iloc[j] < df["open"].iloc[j])
-        price_range       = max(df["high"].iloc[i-8:i]) - min(df["low"].iloc[i-8:i])
-        atr_current       = atr_val.iloc[i]
-        flat_zone         = bearish_candles >= 5 and price_range < atr_current * 0.5
-        flat_zone_warning = "⚠️ PLYTKA STREFA!\n" if flat_zone else ""
-
         h4_start = ts.minute < 15 and ts.hour % 4 == 0
+
+        close_price      = df["close"].iloc[i]
+        current_tma_mid  = round(tma_mid.iloc[-1], 0)
+        sl_long          = round(close_price * (1 - 0.019), 0)
+        sl_short         = round(close_price * (1 + 0.019), 0)
+        tp_long          = round(upper.iloc[i], 0)
+        tp_short         = round(lower.iloc[i], 0)
+        qty              = round(375 / abs(close_price * 0.019), 4)
+
+        rr_long  = round(abs(tp_long - close_price) / abs(close_price - sl_long), 2)
+        rr_short = round(abs(close_price - tp_short) / abs(sl_short - close_price), 2)
 
         if adx_val < 25:
             adx_info = f"ADX: {round(adx_val,1)} ✅ OK"
@@ -197,11 +173,7 @@ while True:
         else:
             h1_info = f"H1 Stoch: {round(h1_k,1)} ⚪ Neutral{h1_cross_info}"
 
-        close_price = df["close"].iloc[i]
-        sl_long     = round(close_price * (1 - 0.019), 0)
-        sl_short    = round(close_price * (1 + 0.019), 0)
-        qty         = round(375 / abs(close_price * 0.019), 4)
-
+        # Cooldown
         in_cooldown = False
         if last_close_time:
             elapsed = (datetime.now(timezone.utc) - last_close_time).total_seconds() / 60
@@ -214,184 +186,93 @@ while True:
         signal_short = (touched_upper and bear_reaction and stoch_ob and
                        no_weekend and momentum_ok_short and not macro_block and adx_ok and not in_cooldown)
 
-        # ─── KAMPANIA H4 ──────────────────────────────────────
+        # Kampania H4
         if h4_start and active_direction == "LONG" and momentum < -1.0:
-            send_telegram("⚠️ KAMPANIA H4 PODAZOWA!\nRozważ zamknięcie LONG!")
+            send_telegram(
+                f"⚠️ KAMPANIA H4 PODAZOWA!\n"
+                f"Momentum: {round(momentum,2)}%\n"
+                f"Rozważ zamknięcie LONG!"
+            )
 
         if h4_start and active_direction == "SHORT" and momentum > 1.0:
-            send_telegram("⚠️ KAMPANIA H4 POPYTOWA!\nRozważ zamknięcie SHORT!")
+            send_telegram(
+                f"⚠️ KAMPANIA H4 POPYTOWA!\n"
+                f"Momentum: {round(momentum,2)}%\n"
+                f"Rozważ zamknięcie SHORT!"
+            )
 
-        # ─── MONITORING LONG ──────────────────────────────────
-        if active_direction == "LONG" and active_sl:
-
-            if not dokladka_alert_sent and current_price > active_entry and bull_reaction:
-                send_telegram(
-                    f"⚡ DOKLADKA mozliwa!\n"
-                    f"SL dokladki (knot): {round(df['low'].iloc[i], 0)}\n"
-                    f"Max SL dokladki 1%: {round(active_entry * 0.99, 0)}"
-                )
-                dokladka_alert_sent = True
-
-            if current_low <= active_sl:
-                send_telegram(
-                    f"❌ SL trafiony!\n"
-                    f"LONG zamkniety na {active_sl}\n"
-                    f"Strata: ~${round((active_entry - active_sl) * qty, 0)}"
-                )
-                last_close_time     = datetime.now(timezone.utc)
-                active_direction    = None
-                active_sl           = None
-                active_entry        = None
-                active_tp_mid       = None
-                dokladka_alert_sent = False
-                pending_signal      = None
-                pending_sl          = None
-                pending_qty         = None
-
-            elif current_high >= current_tma_mid:
-                send_telegram(
-                    f"🎯 TP trafiony — TMA Mid!\n"
-                    f"Zamknij LONG!\n"
-                    f"Cena: {current_price}\n"
-                    f"TMA Mid: {round(current_tma_mid, 0)}\n"
-                    f"Zysk szacowany: ~${round((current_tma_mid - active_entry) * qty, 0)}"
-                )
-                last_close_time     = datetime.now(timezone.utc)
-                active_direction    = None
-                active_sl           = None
-                active_entry        = None
-                active_tp_mid       = None
-                dokladka_alert_sent = False
-                pending_signal      = None
-                pending_sl          = None
-                pending_qty         = None
-
-        # ─── MONITORING SHORT ─────────────────────────────────
-        elif active_direction == "SHORT" and active_sl:
-
-            if not dokladka_alert_sent and current_price < active_entry and bear_reaction:
-                send_telegram(
-                    f"⚡ DOKLADKA mozliwa!\n"
-                    f"SL dokladki (knot): {round(df['high'].iloc[i], 0)}\n"
-                    f"Max SL dokladki 1%: {round(active_entry * 1.01, 0)}"
-                )
-                dokladka_alert_sent = True
-
-            if current_high >= active_sl:
-                send_telegram(
-                    f"❌ SL trafiony!\n"
-                    f"SHORT zamkniety na {active_sl}\n"
-                    f"Strata: ~${round((active_sl - active_entry) * qty, 0)}"
-                )
-                last_close_time     = datetime.now(timezone.utc)
-                active_direction    = None
-                active_sl           = None
-                active_entry        = None
-                active_tp_mid       = None
-                dokladka_alert_sent = False
-                pending_signal      = None
-                pending_sl          = None
-                pending_qty         = None
-
-            elif current_low <= current_tma_mid:
-                send_telegram(
-                    f"🎯 TP trafiony — TMA Mid!\n"
-                    f"Zamknij SHORT!\n"
-                    f"Cena: {current_price}\n"
-                    f"TMA Mid: {round(current_tma_mid, 0)}\n"
-                    f"Zysk szacowany: ~${round((active_entry - current_tma_mid) * qty, 0)}"
-                )
-                last_close_time     = datetime.now(timezone.utc)
-                active_direction    = None
-                active_sl           = None
-                active_entry        = None
-                active_tp_mid       = None
-                dokladka_alert_sent = False
-                pending_signal      = None
-                pending_sl          = None
-                pending_qty         = None
-
-        # ─── PENDING ──────────────────────────────────────────
+        # Pending
         if active_direction is None and not in_cooldown:
             if signal_long and pending_signal != "LONG":
                 pending_signal = "LONG"
-                pending_close  = close_price
                 pending_sl     = sl_long
                 pending_qty    = qty
                 send_telegram(
                     f"⏳ OCZEKUJE na potwierdzenie LONG\n"
                     f"Następna świeca musi być zielona\n"
                     f"Strefa: {close_price}\n"
-                    f"SL planowany: {sl_long}\n"
-                    f"TP planowany (TMA Mid): {round(current_tma_mid, 0)}"
+                    f"SL: {sl_long}\n"
+                    f"TP min (TMA Mid): {current_tma_mid}\n"
+                    f"TP max (pasmo): {tp_long}"
                 )
 
             elif signal_short and pending_signal != "SHORT":
                 pending_signal = "SHORT"
-                pending_close  = close_price
                 pending_sl     = sl_short
                 pending_qty    = qty
                 send_telegram(
                     f"⏳ OCZEKUJE na potwierdzenie SHORT\n"
                     f"Następna świeca musi być czerwona\n"
                     f"Strefa: {close_price}\n"
-                    f"SL planowany: {sl_short}\n"
-                    f"TP planowany (TMA Mid): {round(current_tma_mid, 0)}"
+                    f"SL: {sl_short}\n"
+                    f"TP min (TMA Mid): {current_tma_mid}\n"
+                    f"TP max (pasmo): {tp_short}"
                 )
 
-        # ─── POTWIERDZENIE ŚWIECY ─────────────────────────────
+        # Potwierdzenie świecy
         if pending_signal == "LONG" and bull_reaction and active_direction is None:
             send_telegram(
                 f"🟢 LONG! ✅ Świeca potwierdzona\n"
                 f"Entry: {close_price}\n"
                 f"SL: {pending_sl}\n"
-                f"TP: {round(current_tma_mid, 0)} (TMA Mid)\n"
+                f"TP min: {current_tma_mid} (TMA Mid)\n"
+                f"TP max: {tp_long} (pasmo)\n"
+                f"RR min: {rr_long}\n"
                 f"Qty: {pending_qty} BTC\n"
                 f"Stoch M15: {round(stoch_k_m15.iloc[i],1)}\n"
                 f"{h1_info}\n"
                 f"{adx_info}\n"
                 f"Momentum: {round(momentum,2)}%\n"
-                f"{flat_zone_warning}"
                 f"{us_session_info}"
             )
-            active_direction    = "LONG"
-            active_sl           = pending_sl
-            active_entry        = close_price
-            active_tp_mid       = current_tma_mid
-            dokladka_alert_sent = False
-            pending_signal      = None
-            pending_close       = None
-            pending_sl          = None
-            pending_qty         = None
+            active_direction = "LONG"
+            pending_signal   = None
+            pending_sl       = None
+            pending_qty      = None
 
         elif pending_signal == "SHORT" and bear_reaction and active_direction is None:
             send_telegram(
                 f"🔴 SHORT! ✅ Świeca potwierdzona\n"
                 f"Entry: {close_price}\n"
                 f"SL: {pending_sl}\n"
-                f"TP: {round(current_tma_mid, 0)} (TMA Mid)\n"
+                f"TP min: {current_tma_mid} (TMA Mid)\n"
+                f"TP max: {tp_short} (pasmo)\n"
+                f"RR min: {rr_short}\n"
                 f"Qty: {pending_qty} BTC\n"
                 f"Stoch M15: {round(stoch_k_m15.iloc[i],1)}\n"
                 f"{h1_info}\n"
                 f"{adx_info}\n"
                 f"Momentum: {round(momentum,2)}%\n"
-                f"{flat_zone_warning}"
                 f"{us_session_info}"
             )
-            active_direction    = "SHORT"
-            active_sl           = pending_sl
-            active_entry        = close_price
-            active_tp_mid       = current_tma_mid
-            dokladka_alert_sent = False
-            pending_signal      = None
-            pending_close       = None
-            pending_sl          = None
-            pending_qty         = None
+            active_direction = "SHORT"
+            pending_signal   = None
+            pending_sl       = None
+            pending_qty      = None
 
         elif pending_signal and not bull_reaction and not bear_reaction:
             send_telegram(f"❌ Sygnał {pending_signal} nie potwierdzony — pomijam.")
             pending_signal = None
-            pending_close  = None
             pending_sl     = None
             pending_qty    = None
 
