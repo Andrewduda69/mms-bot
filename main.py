@@ -106,17 +106,17 @@ def is_macro_blackout():
 def get_h4_campaign():
     df_h4  = get_klines("4h", 10)
     h4_chg = (df_h4["close"].iloc[-2] - df_h4["open"].iloc[-2]) / df_h4["open"].iloc[-2] * 100
-    if h4_chg < -0.3:
+    if h4_chg < -0.5:
         return "BEARISH"
-    elif h4_chg > 0.3:
+    elif h4_chg > 0.5:
         return "BULLISH"
     return "NEUTRAL"
 
 def qty(price, mult=1.0):
-    base = round(750 / (price * 0.01), 4)
+    base = round(250 / (price * 0.02), 4)
     return round(base * mult, 4)
 
-send_telegram("MMS Bot v21 — Icarus Style 0.3 BTC uruchomiony!")
+send_telegram("MMS Bot v22 — Icarus Style uruchomiony!")
 
 while True:
     try:
@@ -152,8 +152,8 @@ while True:
         camp_blocks_long  = h4_campaign == "BEARISH"
         camp_blocks_short = h4_campaign == "BULLISH"
 
-        sl_long  = round(close_price * 0.99, 0)
-        sl_short = round(close_price * 1.01, 0)
+        sl_long  = round(close_price * 0.98, 0)
+        sl_short = round(close_price * 1.02, 0)
         tp_long  = round(upper.iloc[i], 0)
         tp_short = round(lower.iloc[i], 0)
         size     = qty(close_price, state["size_mult"])
@@ -187,6 +187,7 @@ while True:
                     f"Następna świeca musi być zielona\n"
                     f"Strefa: {close_price}\n"
                     f"SL: {sl_long} | TP: {tp_long}\n"
+                    f"Size: {size} BTC\n"
                     f"{stoch_info} | {camp_info}"
                 )
             elif signal_short:
@@ -197,6 +198,7 @@ while True:
                     f"Następna świeca musi być czerwona\n"
                     f"Strefa: {close_price}\n"
                     f"SL: {sl_short} | TP: {tp_short}\n"
+                    f"Size: {size} BTC\n"
                     f"{stoch_info} | {camp_info}"
                 )
 
@@ -206,7 +208,7 @@ while True:
                 send_telegram(
                     f"🟢 LONG! ✅\n"
                     f"Entry: {close_price}\n"
-                    f"SL: {sl_long}\n"
+                    f"SL: {sl_long} (2%)\n"
                     f"TP: {tp_long}\n"
                     f"Size: {size} BTC\n"
                     f"{stoch_info} | {camp_info}\n"
@@ -225,7 +227,7 @@ while True:
                 send_telegram(
                     f"🔴 SHORT! ✅\n"
                     f"Entry: {close_price}\n"
-                    f"SL: {sl_short}\n"
+                    f"SL: {sl_short} (2%)\n"
                     f"TP: {tp_short}\n"
                     f"Size: {size} BTC\n"
                     f"{stoch_info} | {camp_info}\n"
@@ -250,8 +252,8 @@ while True:
                 f"⚡ DOKŁADKA LONG\n"
                 f"Entry: {close_price}\n"
                 f"SL knot: {round(df['low'].iloc[i], 0)}\n"
-                f"Size: {dokladka_size} BTC\n"
-                f"Max SL dokładki 1%: {round(close_price * 0.99, 0)}"
+                f"Max SL 1%: {round(close_price * 0.99, 0)}\n"
+                f"Size: {dokladka_size} BTC"
             )
             state["dokladka_done"] = True
 
@@ -265,8 +267,8 @@ while True:
                 f"⚡ DOKŁADKA SHORT\n"
                 f"Entry: {close_price}\n"
                 f"SL knot: {round(df['high'].iloc[i], 0)}\n"
-                f"Size: {dokladka_size} BTC\n"
-                f"Max SL dokładki 1%: {round(close_price * 1.01, 0)}"
+                f"Max SL 1%: {round(close_price * 1.01, 0)}\n"
+                f"Size: {dokladka_size} BTC"
             )
             state["dokladka_done"] = True
 
@@ -277,7 +279,7 @@ while True:
                     f"🔄 CUT AND REVERSE!\n"
                     f"Zamknij LONG → Otwórz SHORT\n"
                     f"Entry SHORT: {close_price}\n"
-                    f"SL: {sl_short}\n"
+                    f"SL: {sl_short} (2%)\n"
                     f"TP: {tp_short}\n"
                     f"Size: {size} BTC\n"
                     f"Po zamknięciu → /reset gdy wyjdziesz"
@@ -294,7 +296,7 @@ while True:
                     f"🔄 CUT AND REVERSE!\n"
                     f"Zamknij SHORT → Otwórz LONG\n"
                     f"Entry LONG: {close_price}\n"
-                    f"SL: {sl_long}\n"
+                    f"SL: {sl_long} (2%)\n"
                     f"TP: {tp_long}\n"
                     f"Size: {size} BTC\n"
                     f"Po zamknięciu → /reset gdy wyjdziesz"
