@@ -15,6 +15,7 @@ PARAMS = {
     "atr_mult":   1.5,
     "tma_len":    240,
     "atr_period": 14,
+    "timeframe":  "15m",
 }
 
 KAPITAL    = 25000
@@ -24,6 +25,7 @@ MAX_DD_PCT = 5.0
 ATR_MULTS   = [1.5, 2.0, 2.5, 3.0]
 TMA_LENS    = [100, 150, 200, 240, 300]
 ATR_PERIODS = [1, 2, 3, 5, 14]
+TIMEFRAMES  = ["10m", "15m", "20m", "30m"]
 
 state = {
     "direction":     None,
@@ -134,7 +136,8 @@ def get_updates():
                     f"Size: x{state['size_mult']}\n"
                     f"Dokładka: {'TAK' if state['dokladka_done'] else 'NIE'}\n"
                     f"Pending: {state['pending'] or 'Brak'}\n"
-                    f"Parametry: {PARAMS['atr_mult']}/{PARAMS['tma_len']}/{PARAMS['atr_period']}"
+                    f"Timeframe: {PARAMS['timeframe']}\n"
+                    f"Parametry: {PARAMS['atr_mult']} / {PARAMS['tma_len']} / {PARAMS['atr_period']}"
                 )
     except:
         pass
@@ -147,10 +150,10 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
     lower   = tma_mid - atr_mult * atr_val
     stoch   = stochastic(df)
 
-    trades  = []
-    equity  = KAPITAL
-    max_eq  = KAPITAL
-    max_dd  = 0
+    trades = []
+    equity = KAPITAL
+    max_eq = KAPITAL
+    max_dd = 0
 
     st = {
         "direction": None, "entry": None, "sl": None,
@@ -169,18 +172,18 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
         is_wknd = ts.weekday() in [5, 6]
         is_mon  = ts.weekday() == 0
 
-        h4_chg = (df_h4["close"].iloc[-2] - df_h4["open"].iloc[-2]) / df_h4["open"].iloc[-2] * 100
+        h4_chg       = (df_h4["close"].iloc[-2] - df_h4["open"].iloc[-2]) / df_h4["open"].iloc[-2] * 100
         blocks_long  = h4_chg < -0.5
         blocks_short = h4_chg >  0.5
 
-        t_lower = row["low"]  <= lower.iloc[i]
-        t_upper = row["high"] >= upper.iloc[i]
-        is_os   = stoch.iloc[i] <= 20
-        is_ob   = stoch.iloc[i] >= 80
+        t_lower   = row["low"]  <= lower.iloc[i]
+        t_upper   = row["high"] >= upper.iloc[i]
+        is_os     = stoch.iloc[i] <= 20
+        is_ob     = stoch.iloc[i] >= 80
         can_trade = not is_wknd and not is_mon
-        sl_l    = close_p * 0.98
-        sl_s    = close_p * 1.02
-        size_b  = qty(close_p, st["size_mult"])
+        sl_l      = close_p * 0.98
+        sl_s      = close_p * 1.02
+        size_b    = qty(close_p, st["size_mult"])
 
         # SL check
         if st["direction"] == "LONG" and row["low"] <= st["sl"]:
@@ -211,10 +214,10 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
             max_eq  = max(max_eq, equity)
             if pnl > 0:
                 st["size_mult"] = 1.0
-            st["direction"] = "SHORT"
-            st["entry"]     = close_p
-            st["sl"]        = sl_s
-            st["base_bar"]  = i
+            st["direction"]     = "SHORT"
+            st["entry"]         = close_p
+            st["sl"]            = sl_s
+            st["base_bar"]      = i
             st["dokladka_done"] = False
 
         elif st["direction"] == "SHORT" and t_lower and bull and is_os and not blocks_long:
@@ -224,10 +227,10 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
             max_eq  = max(max_eq, equity)
             if pnl > 0:
                 st["size_mult"] = 1.0
-            st["direction"] = "LONG"
-            st["entry"]     = close_p
-            st["sl"]        = sl_l
-            st["base_bar"]  = i
+            st["direction"]     = "LONG"
+            st["entry"]         = close_p
+            st["sl"]            = sl_l
+            st["base_bar"]      = i
             st["dokladka_done"] = False
 
         # PENDING
@@ -242,50 +245,56 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
         # POTWIERDZENIE
         if st["pending"] == "LONG" and i == st["pending_bar"] + 1:
             if bull:
-                st["direction"] = "LONG"
-                st["entry"]     = close_p
-                st["sl"]        = sl_l
-                st["base_bar"]  = i
+                st["direction"]     = "LONG"
+                st["entry"]         = close_p
+                st["sl"]            = sl_l
+                st["base_bar"]      = i
                 st["dokladka_done"] = False
-            st["pending"] = None
+            st["pending"]     = None
             st["pending_bar"] = None
 
         elif st["pending"] == "SHORT" and i == st["pending_bar"] + 1:
             if bear:
-                st["direction"] = "SHORT"
-                st["entry"]     = close_p
-                st["sl"]        = sl_s
-                st["base_bar"]  = i
+                st["direction"]     = "SHORT"
+                st["entry"]         = close_p
+                st["sl"]            = sl_s
+                st["base_bar"]      = i
                 st["dokladka_done"] = False
-            st["pending"] = None
+            st["pending"]     = None
             st["pending_bar"] = None
 
     if len(trades) < 5:
         return 0, 0, 0
 
-    total_pnl = sum(trades)
-    pct       = total_pnl / KAPITAL * 100
+    pct = sum(trades) / KAPITAL * 100
     return round(pct, 2), round(max_dd, 2), len(trades)
 
 def run_optimization():
     global PARAMS
     try:
-        send_telegram("🔍 Parametryzacja startuje...")
-        df    = get_klines("15m", 1440)
+        send_telegram("🔍 Parametryzacja startuje — 400 kombinacji...")
         df_h4 = get_klines("4h", 100)
 
         best_pct    = -999
         best_params = None
         best_dd     = 0
         best_trades = 0
+        best_tf     = "15m"
 
-        for atr_mult, tma_len, atr_period in product(ATR_MULTS, TMA_LENS, ATR_PERIODS):
-            pct, dd, n = backtest_opt(df, df_h4, atr_mult, tma_len, atr_period)
-            if dd <= MAX_DD_PCT and pct > best_pct and n >= 5:
-                best_pct    = pct
-                best_params = (atr_mult, tma_len, atr_period)
-                best_dd     = dd
-                best_trades = n
+        for tf, atr_mult, tma_len, atr_period in product(TIMEFRAMES, ATR_MULTS, TMA_LENS, ATR_PERIODS):
+            try:
+                # Pobierz odpowiednią ilość świec dla każdego TF
+                limits = {"10m": 2160, "15m": 1440, "20m": 1080, "30m": 720}
+                df  = get_klines(tf, limits[tf])
+                pct, dd, n = backtest_opt(df, df_h4, atr_mult, tma_len, atr_period)
+                if dd <= MAX_DD_PCT and pct > best_pct and n >= 5:
+                    best_pct    = pct
+                    best_params = (atr_mult, tma_len, atr_period)
+                    best_dd     = dd
+                    best_trades = n
+                    best_tf     = tf
+            except:
+                continue
 
         if best_params is None:
             send_telegram("⚠️ Brak parametrów spełniających kryteria — zostawiam poprzednie.")
@@ -294,17 +303,27 @@ def run_optimization():
         PARAMS["atr_mult"]   = best_params[0]
         PARAMS["tma_len"]    = best_params[1]
         PARAMS["atr_period"] = best_params[2]
+        PARAMS["timeframe"]  = best_tf
+
+        tf_display = {"10m": "M10", "15m": "M15", "20m": "M20", "30m": "M30"}
 
         send_telegram(
             f"✅ Parametryzacja zakończona!\n"
+            f"─────────────────\n"
+            f"Timeframe:  {tf_display[best_tf]}\n"
             f"ATR Mult:   {PARAMS['atr_mult']}\n"
             f"TMA Len:    {PARAMS['tma_len']}\n"
             f"ATR Period: {PARAMS['atr_period']}\n"
+            f"─────────────────\n"
             f"Wynik: +{best_pct}%\n"
             f"Max DD: {best_dd}%\n"
             f"Tradów: {best_trades}\n"
             f"─────────────────\n"
-            f"Zaktualizuj TV: {PARAMS['atr_mult']} / {PARAMS['tma_len']} / {PARAMS['atr_period']}"
+            f"Zaktualizuj TV:\n"
+            f"Interwał: {tf_display[best_tf]}\n"
+            f"ATR Mult: {PARAMS['atr_mult']}\n"
+            f"TMA Len: {PARAMS['tma_len']}\n"
+            f"ATR Period: {PARAMS['atr_period']}"
         )
     except Exception as e:
         send_telegram(f"Błąd optymalizacji: {str(e)}")
@@ -316,7 +335,7 @@ while True:
     try:
         get_updates()
 
-        df = get_klines("15m", 500)
+        df = get_klines(PARAMS["timeframe"], 500)
 
         tma_mid = tma(df["close"], PARAMS["tma_len"])
         atr_val = atr_calc(df, PARAMS["atr_period"])
@@ -381,7 +400,8 @@ while True:
                     f"Następna świeca musi być zielona\n"
                     f"Strefa: {close_price}\n"
                     f"SL: {sl_long} | TP: {tp_long}\n"
-                    f"{stoch_info} | {camp_info}"
+                    f"{stoch_info} | {camp_info}\n"
+                    f"TF: {PARAMS['timeframe']}"
                 )
             elif signal_short:
                 state["pending"]     = "SHORT"
@@ -391,7 +411,8 @@ while True:
                     f"Następna świeca musi być czerwona\n"
                     f"Strefa: {close_price}\n"
                     f"SL: {sl_short} | TP: {tp_short}\n"
-                    f"{stoch_info} | {camp_info}"
+                    f"{stoch_info} | {camp_info}\n"
+                    f"TF: {PARAMS['timeframe']}"
                 )
 
         # ─── POTWIERDZENIE ŚWIECY ─────────────────────────
