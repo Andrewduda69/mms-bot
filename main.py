@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 import numpy as np
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 BOT_TOKEN = "8409956991:AAHtQm-3YY09DLjIGoTSqudtMd_wgq_d2FM"
 CHAT_ID = "-5299312717"
@@ -106,17 +106,23 @@ def is_macro_blackout():
 def get_h4_campaign():
     df_h4  = get_klines("4h", 10)
     h4_chg = (df_h4["close"].iloc[-2] - df_h4["open"].iloc[-2]) / df_h4["open"].iloc[-2] * 100
-    if h4_chg < -0.5:
+    if h4_chg < -0.3:
         return "BEARISH"
-    elif h4_chg > 0.5:
+    elif h4_chg > 0.3:
         return "BULLISH"
     return "NEUTRAL"
 
 def qty(price, mult=1.0):
-    base = round(250 / (price * 0.02), 4)
-    return round(base * mult, 4)
+    risk = 25000 * 1.0 / 100
+    return round(risk / (price * 0.02) * mult, 4)
 
-send_telegram("MMS Bot v22 — Icarus Style uruchomiony!")
+def qty_dok(price):
+    risk = 25000 * 1.0 / 100
+    return round(risk / (price * 0.01), 4)
+
+send_telegram("MMS Bot v21 — uruchomiony!")
+
+parametryzacja_wyslana = set()
 
 while True:
     try:
@@ -133,7 +139,6 @@ while True:
         i             = len(df) - 2
         current_bar   = i
         close_price   = df["close"].iloc[i]
-        current_price = df["close"].iloc[-1]
 
         bull_reaction = df["close"].iloc[i] > df["open"].iloc[i]
         bear_reaction = df["close"].iloc[i] < df["open"].iloc[i]
@@ -157,6 +162,7 @@ while True:
         tp_long  = round(upper.iloc[i], 0)
         tp_short = round(lower.iloc[i], 0)
         size     = qty(close_price, state["size_mult"])
+        size_d   = qty_dok(close_price)
 
         hour_utc        = ts.hour
         us_session      = 15 <= hour_utc < 17
@@ -172,10 +178,10 @@ while True:
         camp_info = f"H4: {h4_campaign}"
 
         signal_long  = (touched_lower and bull_reaction and is_os and
-                       not is_weekend and macro_ok and not camp_blocks_long)
+                        not is_weekend and macro_ok and not camp_blocks_long)
 
         signal_short = (touched_upper and bear_reaction and is_ob and
-                       not is_weekend and macro_ok and not camp_blocks_short)
+                        not is_weekend and macro_ok and not camp_blocks_short)
 
         # ─── PENDING ──────────────────────────────────────────
         if state["direction"] is None and state["pending"] is None:
@@ -187,7 +193,6 @@ while True:
                     f"Następna świeca musi być zielona\n"
                     f"Strefa: {close_price}\n"
                     f"SL: {sl_long} | TP: {tp_long}\n"
-                    f"Size: {size} BTC\n"
                     f"{stoch_info} | {camp_info}"
                 )
             elif signal_short:
@@ -198,7 +203,6 @@ while True:
                     f"Następna świeca musi być czerwona\n"
                     f"Strefa: {close_price}\n"
                     f"SL: {sl_short} | TP: {tp_short}\n"
-                    f"Size: {size} BTC\n"
                     f"{stoch_info} | {camp_info}"
                 )
 
@@ -247,13 +251,12 @@ while True:
             state["base_bar"] is not None and
             current_bar == state["base_bar"] + 1 and
             bull_reaction):
-            dokladka_size = qty(close_price, state["size_mult"])
             send_telegram(
                 f"⚡ DOKŁADKA LONG\n"
                 f"Entry: {close_price}\n"
                 f"SL knot: {round(df['low'].iloc[i], 0)}\n"
-                f"Max SL 1%: {round(close_price * 0.99, 0)}\n"
-                f"Size: {dokladka_size} BTC"
+                f"Size: {size_d} BTC\n"
+                f"Max SL dokładki 1%: {round(close_price * 0.99, 0)}"
             )
             state["dokladka_done"] = True
 
@@ -262,13 +265,12 @@ while True:
             state["base_bar"] is not None and
             current_bar == state["base_bar"] + 1 and
             bear_reaction):
-            dokladka_size = qty(close_price, state["size_mult"])
             send_telegram(
                 f"⚡ DOKŁADKA SHORT\n"
                 f"Entry: {close_price}\n"
                 f"SL knot: {round(df['high'].iloc[i], 0)}\n"
-                f"Max SL 1%: {round(close_price * 1.01, 0)}\n"
-                f"Size: {dokladka_size} BTC"
+                f"Size: {size_d} BTC\n"
+                f"Max SL dokładki 1%: {round(close_price * 1.01, 0)}"
             )
             state["dokladka_done"] = True
 
@@ -306,6 +308,17 @@ while True:
                 state["base_bar"]      = current_bar
                 state["dokladka_done"] = False
                 state["pending"]       = None
+
+        # ─── PRZYPOMNIENIE PARAMETRYZACJI ─────────────────────
+        today = date.today()
+        klucz = (today.year, today.month, today.day)
+        if today.day in [1, 16] and klucz not in parametryzacja_wyslana:
+            send_telegram(
+                "🔔 CZAS NA PARAMETRYZACJĘ!\n"
+                "Uruchom optimizer.py na komputerze:\n"
+                "py C:\\Users\\Lucas\\Desktop\\optimizer.py"
+            )
+            parametryzacja_wyslana.add(klucz)
 
         time.sleep(120)
 
