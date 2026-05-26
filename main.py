@@ -10,7 +10,7 @@ CHAT_ID   = "-5299312717"
 
 MACRO_EVENTS = []
 
-# ─── PARAMETRY (aktualizowane przez optimizer) ────────────
+# ─── PARAMETRY ────────────────────────────────────────────
 PARAMS = {
     "atr_mult":   1.5,
     "tma_len":    240,
@@ -40,7 +40,6 @@ state = {
 last_update_id      = 0
 parametryzacja_done = set()
 
-# ─── FUNKCJE PODSTAWOWE ───────────────────────────────────
 def send_telegram(msg):
     requests.get(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -185,6 +184,11 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
         sl_s      = close_p * 1.02
         size_b    = qty(close_p, st["size_mult"])
 
+        # Timeout pendingu
+        if st["pending"] is not None and i > st["pending_bar"] + 2:
+            st["pending"]     = None
+            st["pending_bar"] = None
+
         # SL check
         if st["direction"] == "LONG" and row["low"] <= st["sl"]:
             pnl = (st["sl"] - st["entry"]) * size_b
@@ -283,7 +287,6 @@ def run_optimization():
 
         for tf, atr_mult, tma_len, atr_period in product(TIMEFRAMES, ATR_MULTS, TMA_LENS, ATR_PERIODS):
             try:
-                # Pobierz odpowiednią ilość świec dla każdego TF
                 limits = {"10m": 2160, "15m": 1440, "20m": 1080, "30m": 720}
                 df  = get_klines(tf, limits[tf])
                 pct, dd, n = backtest_opt(df, df_h4, atr_mult, tma_len, atr_period)
@@ -389,6 +392,15 @@ while True:
 
         signal_short = (touched_upper and bear_reaction and is_ob and
                         not is_weekend and macro_ok and not camp_blocks_short)
+
+        # ─── TIMEOUT PENDINGU ─────────────────────────────
+        if state["pending"] is not None and current_bar > state["pending_bar"] + 2:
+            send_telegram(
+                f"⏰ Pending {state['pending']} wygasł — brak potwierdzenia świecy.\n"
+                f"Bot gotowy na nowy sygnał."
+            )
+            state["pending"]     = None
+            state["pending_bar"] = None
 
         # ─── PENDING ──────────────────────────────────────
         if state["direction"] is None and state["pending"] is None:
