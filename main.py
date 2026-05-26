@@ -35,6 +35,7 @@ state = {
     "dokladka_done": False,
     "pending":       None,
     "pending_bar":   None,
+    "pending_time":  None,
 }
 
 last_update_id      = 0
@@ -128,13 +129,17 @@ def get_updates():
                 state["size_mult"] = 1.0
                 send_telegram("✅ Sekwencyjność x1 — po zysku.")
             elif msg.strip() == "/status":
+                pending_info = "Brak"
+                if state["pending"] and state["pending_time"]:
+                    elapsed = int((datetime.now(timezone.utc) - state["pending_time"]).total_seconds() / 60)
+                    pending_info = f"{state['pending']} ({elapsed} min)"
                 send_telegram(
                     f"📊 Status:\n"
                     f"Pozycja: {state['direction'] or 'Brak'}\n"
                     f"Entry: {state['entry'] or '-'}\n"
                     f"Size: x{state['size_mult']}\n"
                     f"Dokładka: {'TAK' if state['dokladka_done'] else 'NIE'}\n"
-                    f"Pending: {state['pending'] or 'Brak'}\n"
+                    f"Pending: {pending_info}\n"
                     f"Timeframe: {PARAMS['timeframe']}\n"
                     f"Parametry: {PARAMS['atr_mult']} / {PARAMS['tma_len']} / {PARAMS['atr_period']}"
                 )
@@ -184,12 +189,10 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
         sl_s      = close_p * 1.02
         size_b    = qty(close_p, st["size_mult"])
 
-        # Timeout pendingu
         if st["pending"] is not None and i > st["pending_bar"] + 2:
             st["pending"]     = None
             st["pending_bar"] = None
 
-        # SL check
         if st["direction"] == "LONG" and row["low"] <= st["sl"]:
             pnl = (st["sl"] - st["entry"]) * size_b
             trades.append(pnl)
@@ -210,7 +213,6 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
                   "base_bar": None, "dokladka_done": False,
                   "pending": None, "pending_bar": None, "size_mult": 0.1}
 
-        # CUT AND REVERSE
         if st["direction"] == "LONG" and t_upper and bear and is_ob and not blocks_short:
             pnl = (close_p - st["entry"]) * size_b
             trades.append(pnl)
@@ -237,7 +239,6 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
             st["base_bar"]      = i
             st["dokladka_done"] = False
 
-        # PENDING
         if st["direction"] is None and st["pending"] is None and can_trade:
             if t_lower and is_os and bull and not blocks_long:
                 st["pending"]     = "LONG"
@@ -246,7 +247,6 @@ def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
                 st["pending"]     = "SHORT"
                 st["pending_bar"] = i
 
-        # POTWIERDZENIE
         if st["pending"] == "LONG" and i == st["pending_bar"] + 1:
             if bull:
                 st["direction"]     = "LONG"
@@ -393,20 +393,24 @@ while True:
         signal_short = (touched_upper and bear_reaction and is_ob and
                         not is_weekend and macro_ok and not camp_blocks_short)
 
-        # ─── TIMEOUT PENDINGU ─────────────────────────────
-        if state["pending"] is not None and current_bar > state["pending_bar"] + 2:
-            send_telegram(
-                f"⏰ Pending {state['pending']} wygasł — brak potwierdzenia świecy.\n"
-                f"Bot gotowy na nowy sygnał."
-            )
-            state["pending"]     = None
-            state["pending_bar"] = None
+        # ─── TIMEOUT PENDINGU (czas rzeczywisty) ──────────
+        if state["pending"] is not None and state["pending_time"] is not None:
+            elapsed = (datetime.now(timezone.utc) - state["pending_time"]).total_seconds()
+            if elapsed > 30 * 60:
+                send_telegram(
+                    f"⏰ Pending {state['pending']} wygasł ({int(elapsed/60)} min).\n"
+                    f"Bot gotowy na nowy sygnał."
+                )
+                state["pending"]      = None
+                state["pending_bar"]  = None
+                state["pending_time"] = None
 
         # ─── PENDING ──────────────────────────────────────
         if state["direction"] is None and state["pending"] is None:
             if signal_long:
-                state["pending"]     = "LONG"
-                state["pending_bar"] = current_bar
+                state["pending"]      = "LONG"
+                state["pending_bar"]  = current_bar
+                state["pending_time"] = datetime.now(timezone.utc)
                 send_telegram(
                     f"⏳ OCZEKUJE LONG\n"
                     f"Następna świeca musi być zielona\n"
@@ -416,8 +420,9 @@ while True:
                     f"TF: {PARAMS['timeframe']}"
                 )
             elif signal_short:
-                state["pending"]     = "SHORT"
-                state["pending_bar"] = current_bar
+                state["pending"]      = "SHORT"
+                state["pending_bar"]  = current_bar
+                state["pending_time"] = datetime.now(timezone.utc)
                 send_telegram(
                     f"⏳ OCZEKUJE SHORT\n"
                     f"Następna świeca musi być czerwona\n"
@@ -444,8 +449,9 @@ while True:
                 state["entry"]         = close_price
                 state["base_bar"]      = current_bar
                 state["dokladka_done"] = False
-            state["pending"]     = None
-            state["pending_bar"] = None
+            state["pending"]      = None
+            state["pending_bar"]  = None
+            state["pending_time"] = None
 
         elif state["pending"] == "SHORT" and current_bar == state["pending_bar"] + 1:
             if bear_reaction:
@@ -463,8 +469,9 @@ while True:
                 state["entry"]         = close_price
                 state["base_bar"]      = current_bar
                 state["dokladka_done"] = False
-            state["pending"]     = None
-            state["pending_bar"] = None
+            state["pending"]      = None
+            state["pending_bar"]  = None
+            state["pending_time"] = None
 
         # ─── DOKŁADKA ─────────────────────────────────────
         if (state["direction"] == "LONG" and
@@ -512,6 +519,7 @@ while True:
                 state["base_bar"]      = current_bar
                 state["dokladka_done"] = False
                 state["pending"]       = None
+                state["pending_time"]  = None
 
         elif state["direction"] == "SHORT":
             if touched_lower and bull_reaction and is_os and not camp_blocks_long:
@@ -529,6 +537,7 @@ while True:
                 state["base_bar"]      = current_bar
                 state["dokladka_done"] = False
                 state["pending"]       = None
+                state["pending_time"]  = None
 
         # ─── PARAMETRYZACJA CO 15 DNI ─────────────────────
         today = date.today()
