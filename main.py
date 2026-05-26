@@ -10,7 +10,6 @@ CHAT_ID   = "-5299312717"
 
 MACRO_EVENTS = []
 
-# ─── PARAMETRY ────────────────────────────────────────────
 PARAMS = {
     "atr_mult":   1.5,
     "tma_len":    240,
@@ -146,7 +145,6 @@ def get_updates():
     except:
         pass
 
-# ─── OPTIMIZER ────────────────────────────────────────────
 def backtest_opt(df, df_h4, atr_mult, tma_len, atr_period):
     tma_mid = tma(df["close"], tma_len)
     atr_val = atr_calc(df, atr_period)
@@ -331,7 +329,6 @@ def run_optimization():
     except Exception as e:
         send_telegram(f"Błąd optymalizacji: {str(e)}")
 
-# ─── START ────────────────────────────────────────────────
 send_telegram("MMS Bot v21 — uruchomiony!")
 
 while True:
@@ -393,7 +390,7 @@ while True:
         signal_short = (touched_upper and bear_reaction and is_ob and
                         not is_weekend and macro_ok and not camp_blocks_short)
 
-        # ─── TIMEOUT PENDINGU (czas rzeczywisty) ──────────
+        # ─── TIMEOUT PENDINGU ─────────────────────────────
         if state["pending"] is not None and state["pending_time"] is not None:
             elapsed = (datetime.now(timezone.utc) - state["pending_time"]).total_seconds()
             if elapsed > 30 * 60:
